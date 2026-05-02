@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Kitchen Ticket Reader</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#111111" />
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    :root {
+      --bg:#0d0d0f; --card:#1b1b20; --card2:#24242b; --text:#f7f7f7;
+      --muted:#b8b8c2; --accent:#ffb347; --line:#34343c; --danger:#ff6b6b;
+      --ok:#6ee7a8;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; background:var(--bg); color:var(--text);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+      padding:env(safe-area-inset-top) 14px 34px 14px;
+    }
+    header{position:sticky;top:0;background:linear-gradient(var(--bg) 82%,transparent);z-index:5;padding:16px 0 10px}
+    h1{margin:0;font-size:27px;line-height:1.05}
+    h2{margin:0 0 10px;font-size:20px}
+    h3{margin:12px 0 6px;font-size:16px;color:var(--accent)}
+    .sub{color:var(--muted);font-size:14px;margin-top:6px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px;margin:12px 0;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+    button,.fileLabel{
+      width:100%;border:none;border-radius:15px;padding:15px;margin:7px 0;
+      font-weight:900;font-size:16px;text-align:center;display:block;
+    }
+    .fileLabel{background:var(--accent);color:#1a1100}
+    button{background:var(--accent);color:#1a1100}
+    button.secondary,.fileLabel.secondary{background:var(--card2);color:var(--text);border:1px solid var(--line)}
+    button.danger{background:#3a1d1d;color:#ffd1d1;border:1px solid #6a3333}
+    button.smallBtn{padding:9px 10px;font-size:13px;margin:0;width:auto;display:inline-block}
+    input[type=file]{display:none}
+    textarea,input,select{
+      width:100%;border-radius:14px;border:1px solid var(--line);background:#111114;color:var(--text);
+      padding:12px;font-size:15px;
+    }
+    textarea{min-height:115px}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    th,td{border-bottom:1px solid var(--line);padding:9px 6px;text-align:left;vertical-align:top}
+    th{color:var(--accent);font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+    .muted{color:var(--muted)}
+    .status{font-weight:800;color:var(--accent);min-height:22px}
+    .small{font-size:13px;color:var(--muted);line-height:1.35}
+    .pill{display:inline-block;background:#2d2d35;border-radius:99px;padding:5px 9px;margin:3px;font-size:13px}
+    .pill button{width:auto;margin:0 0 0 6px;padding:0 4px;background:transparent;color:var(--danger);font-size:14px}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .row3{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
+    details summary{cursor:pointer;color:var(--accent);font-weight:900;margin-bottom:8px}
+    .bad{color:var(--danger)}
+    .ok{color:var(--ok)}
+    .tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+    .tabBtn.active{outline:2px solid var(--accent)}
+    .hidden{display:none}
+    @media(min-width:760px){body{max-width:960px;margin:auto}.wideGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>Kitchen Ticket Reader</h1>
+  <div class="sub">Scan tickets, pull items, seasonings, temps, sides, and totals.</div>
+</header>
+
+<div class="tabs">
+  <button class="secondary tabBtn active" id="scanTab" onclick="showTab('scan')">📸 Scan Tickets</button>
+  <button class="secondary tabBtn" id="setupTab" onclick="showTab('setup')">⚙️ Setup Menu</button>
+</div>
+
+<main id="scanView">
+  <section class="card">
+    <label class="fileLabel" for="cameraInput">📸 Take Ticket Photo</label>
+    <input id="cameraInput" type="file" accept="image/*" capture="environment" />
+
+    <label class="fileLabel secondary" for="uploadInput">🖼️ Upload Ticket Photo(s)</label>
+    <input id="uploadInput" type="file" accept="image/*" multiple />
+
+    <button class="secondary" onclick="parseManualText()">⌨️ Parse typed / pasted ticket text</button>
+    <button class="secondary" onclick="downloadCSV()">⬇️ Download parsed CSV</button>
+    <button class="secondary" onclick="downloadTotalsCSV()">⬇️ Download totals CSV</button>
+    <button class="danger" onclick="clearTickets()">🗑️ Clear tickets only</button>
+
+    <div id="status" class="status"></div>
+    <p class="small">
+      Best results: aim at the food order lines only. Use Setup Menu first so the app knows your real menu.
+    </p>
+  </section>
+
+  <section class="card">
+    <h2>Manual Text Backup</h2>
+    <textarea id="manualText" placeholder="Example:
+2x Ribeye - medium rare - cajun - baked potato
+1 Burger - well done - no seasoning - fries
+3 Wings - extra crispy - buffalo"></textarea>
+  </section>
+
+  <section class="card">
+    <h2>Parsed Items</h2>
+    <div id="itemsWrap" class="muted">No tickets read yet.</div>
+  </section>
+
+  <section class="card">
+    <h2>Compiled Totals</h2>
+    <div id="totalsWrap" class="muted">No totals yet.</div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>What got ignored?</summary>
+      <div id="ignoredWrap" class="muted">Nothing ignored yet.</div>
+    </details>
+  </section>
+</main>
+
+<main id="setupView" class="hidden">
+  <section class="card">
+    <h2>Setup Menu</h2>
+    <p class="small">Add each thing the ticket might say. These save on this phone/browser.</p>
+
+    <h3>Menu Items</h3>
+    <div class="row3">
+      <input id="menuInput" placeholder="Example: ribeye, burger, wings" />
+      <button class="smallBtn" onclick="addWord('menu')">Add</button>
+    </div>
+    <textarea id="menuBulk" placeholder="Paste many menu items here, one per line or separated by commas"></textarea>
+    <button class="secondary" onclick="bulkAdd('menu')">Add Many Menu Items</button>
+    <div id="menuList"></div>
+
+    <h3>Seasonings / Sauces</h3>
+    <div class="row3">
+      <input id="seasoningInput" placeholder="Example: cajun, lemon pepper, buffalo" />
+      <button class="smallBtn" onclick="addWord('seasoning')">Add</button>
+    </div>
+    <textarea id="seasoningBulk" placeholder="Paste many seasonings/sauces here"></textarea>
+    <button class="secondary" onclick="bulkAdd('seasoning')">Add Many Seasonings</button>
+    <div id="seasoningList"></div>
+
+    <h3>Temps / Cook Styles</h3>
+    <div class="row3">
+      <input id="tempInput" placeholder="Example: medium rare, well done, extra crispy" />
+      <button class="smallBtn" onclick="addWord('temp')">Add</button>
+    </div>
+    <textarea id="tempBulk" placeholder="Paste many temps/cook styles here"></textarea>
+    <button class="secondary" onclick="bulkAdd('temp')">Add Many Temps</button>
+    <div id="tempList"></div>
+
+    <h3>Sides</h3>
+    <div class="row3">
+      <input id="sideInput" placeholder="Example: fries, baked potato, mac and cheese" />
+      <button class="smallBtn" onclick="addWord('side')">Add</button>
+    </div>
+    <textarea id="sideBulk" placeholder="Paste many sides here"></textarea>
+    <button class="secondary" onclick="bulkAdd('side')">Add Many Sides</button>
+    <div id="sideList"></div>
+
+    <h3>Ignore Words</h3>
+    <p class="small">Add receipt junk words here so they never become food items.</p>
+    <div class="row3">
+      <input id="ignoreInput" placeholder="Example: subtotal, tax, server" />
+      <button class="smallBtn" onclick="addWord('ignore')">Add</button>
+    </div>
+    <textarea id="ignoreBulk" placeholder="Paste many ignore words here"></textarea>
+    <button class="secondary" onclick="bulkAdd('ignore')">Add Many Ignore Words</button>
+    <div id="ignoreList"></div>
+
+    <button onclick="saveConfig()">💾 Save Setup</button>
+    <button class="secondary" onclick="exportConfig()">⬇️ Export Setup Backup</button>
+    <label class="fileLabel secondary" for="importConfigFile">⬆️ Import Setup Backup</label>
+    <input id="importConfigFile" type="file" accept="application/json,.json" />
+    <button class="danger" onclick="resetConfig()">Reset Setup to Defaults</button>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+const DEFAULT_CONFIG = {
+  menu: ["ribeye","steak","sirloin","filet","burger","cheeseburger","wings","chicken","salmon","shrimp","fries","loaded fries","baked potato","mac and cheese","salad","tacos","pulled pork","brisket","ribs","hot dog","sandwich","fish","crab cake","pasta"],
+  seasoning: ["plain","no seasoning","light seasoning","extra seasoning","salt","pepper","salt pepper","spg","garlic","garlic butter","cajun","old bay","lemon pepper","blackened","bbq","buffalo","teriyaki","ranch","dry rub","house rub","spicy","extra spicy","no salt","low salt","mild","medium","hot"],
+  temp: ["rare","medium rare","med rare","medium","med","medium well","med well","well","well done","no pink","pink","crispy","extra crispy","soft","hot","cold","warm"],
+  side: ["fries","baked potato","mashed potatoes","mac and cheese","coleslaw","green beans","corn","rice","salad","side salad","onion rings","chips"],
+  ignore: ["subtotal","total","tax","change","cash","credit","visa","mastercard","amex","server","table","guest","guests","order","ticket","receipt","paid","balance","qty","item","amount","date","time","auth","approval","merchant","customer","thank","welcome","phone","address","check","sale","payment","tip","gratuity","dine in","take out","pickup","delivery"]
+};
+
+const NORMALIZE = {
+  "mr":"medium rare","med rare":"medium rare","med":"medium",
+  "mw":"medium well","med well":"medium well","wd":"well done",
+  "well":"well done","xtra":"extra","xs":"extra seasoning"
+};
+
+let config = loadConfig();
+let parsedItems = [];
+let ignoredLines = [];
+
+function showTab(which){
+  document.getElementById("scanView").classList.toggle("hidden", which !== "scan");
+  document.getElementById("setupView").classList.toggle("hidden", which !== "setup");
+  document.getElementById("scanTab").classList.toggle("active", which === "scan");
+  document.getElementById("setupTab").classList.toggle("active", which === "setup");
+}
+
+function loadConfig(){
+  try{
+    const saved = JSON.parse(localStorage.getItem("ticketReaderConfigV3"));
+    if(saved) return mergeConfig(saved);
+  }catch(e){}
+  return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+
+function mergeConfig(saved){
+  const out = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  for(const key of Object.keys(out)){
+    if(Array.isArray(saved[key])) out[key] = unique([...saved[key]]);
+  }
+  return out;
+}
+
+function saveConfig(){
+  cleanAllLists();
+  localStorage.setItem("ticketReaderConfigV3", JSON.stringify(config));
+  renderConfig();
+  setStatus("Setup saved.");
+  alert("Setup saved on this phone/browser.");
+}
+
+function resetConfig(){
+  if(!confirm("Reset menu setup back to defaults?")) return;
+  config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  saveConfig();
+}
+
+function cleanAllLists(){
+  for(const key of Object.keys(config)){
+    config[key] = unique(config[key].map(x => norm(x).toLowerCase()).filter(Boolean)).sort();
+  }
+}
+
+function addWord(type){
+  const input = document.getElementById(type + "Input");
+  addItems(type, [input.value]);
+  input.value = "";
+  saveConfig();
+}
+
+function bulkAdd(type){
+  const box = document.getElementById(type + "Bulk");
+  const items = box.value.split(/[\n,]+/);
+  addItems(type, items);
+  box.value = "";
+  saveConfig();
+}
+
+function addItems(type, items){
+  for(const item of items){
+    const cleaned = norm(item).toLowerCase();
+    if(cleaned && !config[type].includes(cleaned)) config[type].push(cleaned);
+  }
+  cleanAllLists();
+}
+
+function removeWord(type, value){
+  config[type] = config[type].filter(x => x !== value);
+  saveConfig();
+}
+
+function renderConfig(){
+  renderList("menu");
+  renderList("seasoning");
+  renderList("temp");
+  renderList("side");
+  renderList("ignore");
+}
+
+function renderList(type){
+  const wrap = document.getElementById(type + "List");
+  if(!wrap) return;
+  wrap.innerHTML = config[type].map(x =>
+    `<span class="pill">${escapeHTML(x)} <button onclick="removeWord('${type}', '${escapeJS(x)}')">✕</button></span>`
+  ).join("") || `<span class="muted">Nothing added yet.</span>`;
+}
+
+function exportConfig(){
+  saveConfig();
+  const text = JSON.stringify(config, null, 2);
+  downloadBlob(text, "ticket-reader-menu-setup.json", "application/json");
+}
+
+document.getElementById("importConfigFile").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if(!file) return;
+  try{
+    const text = await file.text();
+    const incoming = JSON.parse(text);
+    config = mergeConfig(incoming);
+    saveConfig();
+    alert("Setup imported.");
+  }catch(err){
+    alert("Could not import setup file.");
+  }
+});
+
+function setStatus(msg){document.getElementById("status").textContent = msg || "";}
+function escRe(s){return s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");}
+function norm(s){return String(s||"").replace(/[—–]/g,"-").replace(/[|]+/g," ").replace(/\s+/g," ").trim();}
+function title(s){return String(s||"").toLowerCase().replace(/\b\w/g,c=>c.toUpperCase());}
+function normVal(s){let v=String(s||"").toLowerCase().trim();return NORMALIZE[v]||v;}
+function unique(arr){return [...new Set(arr.map(x=>norm(x)).filter(Boolean))];}
+function wordRe(words){return new RegExp("\\b("+words.slice().sort((a,b)=>b.length-a.length).map(escRe).join("|")+")\\b","gi");}
+
+function cleanOCRText(text){
+  return String(text||"")
+    .replace(/[“”]/g,'"')
+    .replace(/[‘’]/g,"'")
+    .replace(/[•·]/g,"\n")
+    .replace(/\r/g,"\n");
+}
+
+function lineIsNoise(line){
+  const low = line.toLowerCase().trim();
+  if(!low || low.length < 2) return true;
+  if(config.ignore.some(w => low.includes(w))) return true;
+  if(/^\W*$/.test(low)) return true;
+  if(/^\$?\d+(\.\d{2})?$/.test(low)) return true;
+  if(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(low)) return true;
+  if(/\d{1,2}:\d{2}/.test(low) && low.length < 15) return true;
+
+  const letters = (low.match(/[a-z]/g)||[]).length;
+  const digits = (low.match(/[0-9]/g)||[]).length;
+  if(letters < 2) return true;
+  if(digits > letters * 2) return true;
+  return false;
+}
+
+function bestMatch(line, list){
+  const low = line.toLowerCase();
+  let best = "";
+  for(const item of list){
+    const re = new RegExp("\\b"+escRe(item.toLowerCase())+"s?\\b","i");
+    if(re.test(low) && item.length > best.length) best = item;
+  }
+  return best;
+}
+
+function allMatches(line, list){
+  const found = [];
+  const low = line.toLowerCase();
+  for(const item of list){
+    const re = new RegExp("\\b"+escRe(item.toLowerCase())+"s?\\b","i");
+    if(re.test(low)) found.push(title(normVal(item)));
+  }
+  return unique(found).map(title);
+}
+
+function extractQty(line){
+  let body = line.trim();
+  let m = body.match(/^\s*(\d+)\s*[xX]\s+(.+)$/);
+  if(m) return {qty: parseInt(m[1],10), body: m[2]};
+  m = body.match(/^\s*(\d+)\s+([A-Za-z].+)$/);
+  if(m) return {qty: parseInt(m[1],10), body: m[2]};
+  return {qty:1, body};
+}
+
+function parseTicketText(text, ticketName){
+  cleanAllLists();
+  const rawLines = cleanOCRText(text).split("\n").map(norm).filter(Boolean);
+  const rows = [];
+  let current = null;
+
+  for(const raw of rawLines){
+    let line = raw.replace(/\$?\d+\.\d{2}/g," ").replace(/\s+/g," ").trim();
+
+    if(lineIsNoise(line)){
+      ignoredLines.push({ticket:ticketName,line:raw,reason:"noise/header/price"});
+      continue;
+    }
+
+    const qtyInfo = extractQty(line);
+    let qty = qtyInfo.qty;
+    let body = qtyInfo.body;
+
+    const menuMatch = bestMatch(body, config.menu);
+    const sides = allMatches(body, config.side);
+    const temps = allMatches(body, config.temp);
+    const seasonings = allMatches(body, config.seasoning);
+
+    const looksLikeModifierOnly =
+      !menuMatch &&
+      (temps.length || seasonings.length || sides.length) &&
+      body.split(/\s+/).length <= 8;
+
+    if(looksLikeModifierOnly && current){
+      current.temp = unique([current.temp, ...temps].join(",").split(",")).join(", ");
+      current.seasoning = unique([current.seasoning, ...seasonings].join(",").split(",")).join(", ");
+      current.sides = unique([current.sides, ...sides].join(",").split(",")).join(", ");
+      current.notes += "; " + raw;
+      continue;
+    }
+
+    const hasFoodSignal = menuMatch || (qty > 1 && (temps.length || seasonings.length || sides.length));
+    if(!hasFoodSignal){
+      ignoredLines.push({ticket:ticketName,line:raw,reason:"not recognized from setup"});
+      continue;
+    }
+
+    let item = menuMatch ? title(menuMatch) : body;
+
+    if(!menuMatch){
+      item = body
+        .replace(wordRe(config.temp)," ")
+        .replace(wordRe(config.seasoning)," ")
+        .replace(wordRe(config.side)," ")
+        .replace(/\b(no|add|extra|light|side|with|w\/|without|sub|on)\b/gi," ")
+        .replace(/[-:,;()]+/g," ");
+      item = title(norm(item));
+    }
+
+    current = {
+      ticket: ticketName,
+      quantity: qty,
+      item,
+      seasoning: seasonings.join(", "),
+      temp: temps.join(", "),
+      sides: sides.join(", "),
+      notes: raw,
+      rawLine: raw
+    };
+    rows.push(current);
+  }
+
+  return rows;
+}
+
+async function runOCR(file, index, total){
+  setStatus(`Reading photo ${index} of ${total}...`);
+  const result = await Tesseract.recognize(file, "eng", {
+    logger: m => {
+      if(m.status){
+        const pct = m.progress ? ` ${Math.round(m.progress*100)}%` : "";
+        setStatus(`Photo ${index}/${total}: ${m.status}${pct}`);
+      }
+    }
+  });
+  return result.data.text || "";
+}
+
+async function handleFiles(files){
+  files = [...files];
+  if(!files.length) return;
+
+  for(let i=0;i<files.length;i++){
+    const file = files[i];
+    try{
+      const text = await runOCR(file, i+1, files.length);
+      const rows = parseTicketText(text, file.name || `Ticket ${Date.now()}`);
+      parsedItems.push(...rows);
+      render();
+    }catch(err){
+      console.error(err);
+      alert("Could not read photo: " + err.message);
+    }
+  }
+
+  setStatus(`Done. Kept ${parsedItems.length} item line(s). Ignored ${ignoredLines.length} junk line(s).`);
+}
+
+document.getElementById("cameraInput").addEventListener("change", e => handleFiles(e.target.files));
+document.getElementById("uploadInput").addEventListener("change", e => handleFiles(e.target.files));
+
+function parseManualText(){
+  const text = document.getElementById("manualText").value;
+  if(!text.trim()){ alert("Paste or type a ticket first."); return; }
+  parsedItems.push(...parseTicketText(text, "Typed Ticket"));
+  document.getElementById("manualText").value = "";
+  setStatus("Manual ticket parsed.");
+  render();
+}
+
+function render(){
+  const itemsWrap = document.getElementById("itemsWrap");
+  const totalsWrap = document.getElementById("totalsWrap");
+  const ignoredWrap = document.getElementById("ignoredWrap");
+
+  if(!parsedItems.length){
+    itemsWrap.innerHTML = "No tickets read yet.";
+    totalsWrap.innerHTML = "No totals yet.";
+  }else{
+    itemsWrap.innerHTML = tableHTML(parsedItems, ["quantity","item","seasoning","temp","sides","ticket"]);
+    totalsWrap.innerHTML = tableHTML(compileTotals(), ["quantity","item","seasoning","temp","sides"]);
+  }
+
+  ignoredWrap.innerHTML = ignoredLines.length
+    ? tableHTML(ignoredLines.slice(-80), ["line","reason","ticket"])
+    : "Nothing ignored yet.";
+}
+
+function compileTotals(){
+  const map = new Map();
+  for(const r of parsedItems){
+    const key = [r.item,r.seasoning,r.temp,r.sides].join("|||");
+    if(!map.has(key)) map.set(key,{quantity:0,item:r.item,seasoning:r.seasoning,temp:r.temp,sides:r.sides});
+    map.get(key).quantity += Number(r.quantity || 1);
+  }
+  return [...map.values()].sort((a,b)=>a.item.localeCompare(b.item));
+}
+
+function tableHTML(rows, cols){
+  return `<table><thead><tr>${cols.map(c=>`<th>${escapeHTML(c)}</th>`).join("")}</tr></thead><tbody>`+
+    rows.map(r=>`<tr>${cols.map(c=>`<td>${cell(r[c])}</td>`).join("")}</tr>`).join("")+
+    `</tbody></table>`;
+}
+
+function cell(v){
+  if(!v) return `<span class="muted">—</span>`;
+  const s = String(v);
+  if(s.includes(",")){
+    return s.split(",").map(x=>`<span class="pill">${escapeHTML(x.trim())}</span>`).join("");
+  }
+  return escapeHTML(s);
+}
+
+function escapeHTML(s){
+  return String(s ?? "").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+function escapeJS(s){
+  return String(s).replace(/\\/g,"\\\\").replace(/'/g,"\\'");
+}
+
+function rowsToCSV(rows){
+  const cols = Object.keys(rows[0] || {});
+  const esc = v => `"${String(v ?? "").replace(/"/g,'""')}"`;
+  return cols.join(",") + "\n" + rows.map(r=>cols.map(c=>esc(r[c])).join(",")).join("\n");
+}
+
+function downloadCSV(){
+  if(!parsedItems.length){ alert("No parsed items yet."); return; }
+  downloadBlob(rowsToCSV(parsedItems), "parsed-ticket-items.csv", "text/csv");
+}
+
+function downloadTotalsCSV(){
+  const totals = compileTotals();
+  if(!totals.length){ alert("No totals yet."); return; }
+  downloadBlob(rowsToCSV(totals), "compiled-ticket-totals.csv", "text/csv");
+}
+
+function downloadBlob(text, filename, type="text/plain"){
+  const blob = new Blob([text], {type});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function clearTickets(){
+  if(!confirm("Clear scanned tickets? Your menu setup stays saved.")) return;
+  parsedItems = [];
+  ignoredLines = [];
+  setStatus("");
+  render();
+}
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("sw.js").catch(()=>{});
+}
+
+renderConfig();
+render();
+</script>
+</body>
+</html>
